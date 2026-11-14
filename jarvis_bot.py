@@ -142,14 +142,41 @@ async def is_admin(chat_id, user_id, context):
 def pick_model():
     try:
         models = client_ai.models.list()
-        return "openai/gpt-oss-20b" if any(m.id == "openai/gpt-oss-20b" for m in models.data) else "qwen/qwen3.8-27b"
+        available_models = [m.id for m in models.data]
+        
+        # لیست مدل‌های جدید و قدرتمند Groq به ترتیب اولویت
+        preferred_models = [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+            "gemma2-9b-it"
+        ]
+        
+        for model in preferred_models:
+            if model in available_models:
+                return model
+                
+        return "llama-3.3-70b-versatile" # اگر هیچ کدوم نبود، این رو امتحان کن
     except Exception as e:
         logger.error(f"model pick failed: {e}")
-        return "openai/gpt-oss-20b"
+        return "llama-3.3-70b-versatile"
 
-# ==================== ۰. تست پینگ ====================
+# ==================== ۰. تست پینگ و ای‌آی ====================
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🏓 پونگ! ربات کاملاً سالمه و به دیتابیس و تلگرام دسترسی داره.")
+
+async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    await msg.reply_text("⏳ در حال تست هوش مصنوعی...")
+    try:
+        target_model = pick_model()
+        res = client_ai.chat.completions.create(
+            messages=[{"role": "user", "content": "فقط بنویس: تست موفق بود!"}],
+            model=target_model,
+        )
+        await msg.reply_text(f"✅ اتصال به Groq موفقیت‌آمیز بود!\n\nمدل: `{target_model}`\nپاسخ: {res.choices[0].message.content}", parse_mode="Markdown")
+    except Exception as e:
+        await msg.reply_text(f"❌ اتصال به Groq شکست خورد:\n\n`{str(e)}`", parse_mode="Markdown")
 
 # ==================== ۱. خوش‌آمدگویی گروه ====================
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -276,6 +303,7 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not user_text:
             await msg.reply_text("بله؟ چه سوالی داری؟")
             return
+            
         creator_keywords = ["سازنده", "کی ساختت", "کی ساخته", "صاحبت", "مالک", "توسعه دهنده", "توسعه‌دهنده", "برنامه نویس", "برنامه‌نویس", "کی درستت کرده"]
         if any(keyword in user_text for keyword in creator_keywords):
             await msg.reply_text(
@@ -288,20 +316,32 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
             return
+
         target_model = pick_model()
         system_prompt = (
             "تو یک دستیار هوشمند، بامزه و خوش‌برخورد به نام جارویس هستی. "
             "قانون مهم: تحت هیچ شرایطی در مکالمات عادی، خودت به سازنده‌ات (امیرارسلان) اشاره نکن. "
             "جواب‌هایت باید کوتاه، مفید، دوستانه و همراه با ایموجی باشد."
         )
+        
         chat_completion = client_ai.chat.completions.create(
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
             model=target_model,
         )
+        
         await msg.reply_text(chat_completion.choices[0].message.content)
+        
     except Exception as e:
         logger.error(f"خطای هوش مصنوعی: {e}")
-        await msg.reply_text("❌ متاسفانه الان نمی‌تونم به هوش مصنوعی وصل بشم.")
+        error_text = str(e)
+        if "401" in error_text or "Unauthorized" in error_text:
+            await msg.reply_text("❌ خطا: کلید API (GROQ_API_KEY) نامعتبر است. لطفاً آن را در Render چک کنید.")
+        elif "429" in error_text or "Rate Limit" in error_text:
+            await msg.reply_text("❌ خطا: محدودیت درخواست به Groq. لطفاً چند لحظه دیگر امتحان کنید.")
+        elif "404" in error_text or "model_not_found" in error_text:
+            await msg.reply_text(f"❌ خطا: مدل `{target_model}` در Groq پیدا نشد.")
+        else:
+            await msg.reply_text(f"❌ خطا در اتصال به هوش مصنوعی:\n`{error_text}`", parse_mode="Markdown")
 
 # ==================== ۸. چت خصوصی ====================
 async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -420,11 +460,15 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
             logger.error(f"ai private error: {e}")
-            await msg.reply_text("❌ خطا در اتصال به هوش مصنوعی.")
+            error_text = str(e)
+            if "401" in error_text or "Unauthorized" in error_text:
+                await msg.reply_text("❌ خطا: کلید API (GROQ_API_KEY) نامعتبر است.")
+            else:
+                await msg.reply_text(f"❌ خطا در اتصال به هوش مصنوعی:\n`{error_text}`", parse_mode="Markdown")
 
 # ==================== ۹. مدیریت پیام‌های گروه ====================
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 راهنمای جارویس\n\n👑 ادمین‌ها:\n• سیک / رفع سیک (ریپلای)\n• اخطار (ریپلای)\n• ضد لینک روشن / خاموش\n\n🎮 کاربران:\n• معرفی | آمار | راهنما\n\n🧠 چت با هوش مصنوعی:\nکلمه جارویس رو بنویس یا ریپلای کن!")
+    await update.message.reply_text("🤖 راهنمای جارویس\n\n👑 ادمین‌ها:\n• سیک / رفع سیک (ریپلای)\n• اخطار (ریپلای)\n• ضد لینک روشن / خاموش\n\n🎮 کاربران:\n• معرفی | آمار | راهنما | تست‌ای‌آی\n\n🧠 چت با هوش مصنوعی:\nکلمه جارویس رو بنویس یا ریپلای کن!")
 
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -437,6 +481,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         except: pass
         return
     await check_anti_link(update, context)
+    
     if text in ("سیک", "رفع سیک", "رفع‌سیک"): await handle_sik(update, context)
     elif text == "اخطار": await warn_user(update, context)
     elif text == "معرفی": await introduce_jarvis(update, context)
@@ -471,6 +516,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start_private, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("ping", ping_command))
+    app.add_handler(CommandHandler("testai", test_ai_command))
     app.add_handler(CallbackQueryHandler(private_callbacks, pattern="^(priv_|adcat_|viewcat_)"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_messages))
     app.add_handler(CommandHandler("start", help_command))
