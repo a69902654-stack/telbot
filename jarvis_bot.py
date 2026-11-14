@@ -34,7 +34,7 @@ GIF_WARN = "https://media.giphy.com/media/l41Yf04O28F8Z0jBK/giphy.gif"
 GIF_MUTE = "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif"
 GIF_INTRO = "https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"
 
-# ==================== Health Check ====================
+# ==================== Health Check (برای Render) ====================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -146,6 +146,10 @@ def pick_model():
     except Exception as e:
         logger.error(f"model pick failed: {e}")
         return "openai/gpt-oss-20b"
+
+# ==================== ۰. تست پینگ ====================
+async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🏓 پونگ! ربات کاملاً سالمه و به دیتابیس و تلگرام دسترسی داره.")
 
 # ==================== ۱. خوش‌آمدگویی گروه ====================
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -454,16 +458,32 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 def main():
     init_db()
     threading.Thread(target=run_health_server, daemon=True).start()
-    app = Application.builder().token(TOKEN).build()
+    
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .get_updates_connect_timeout(30.0)
+        .get_updates_read_timeout(30.0)
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", start_private, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("ping", ping_command))
     app.add_handler(CallbackQueryHandler(private_callbacks, pattern="^(priv_|adcat_|viewcat_)"))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_messages))
     app.add_handler(CommandHandler("start", help_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(ChatMemberHandler(greet_new_member, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & filters.TEXT, main_message_handler))
+
     print("🤖 جارویس روشن شد...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
 
 if __name__ == "__main__":
     main()
