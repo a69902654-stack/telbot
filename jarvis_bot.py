@@ -62,7 +62,6 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS bios (user_id INTEGER PRIMARY KEY, bio_text TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS message_stats (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY (chat_id, user_id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS ads (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, title TEXT, description TEXT, date TEXT)""")
-    # جدول جدید برای ذخیره پیام‌ها جهت تحلیل
     c.execute("""CREATE TABLE IF NOT EXISTS group_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, user_name TEXT, text TEXT)""")
     conn.commit()
     conn.close()
@@ -143,21 +142,6 @@ async def is_admin(chat_id, user_id, context):
     except:
         return False
 
-def pick_model():
-    try:
-        models = client_ai.models.list()
-        available_models = [m.id for m in models.data]
-        preferred_models = ["llama3-8b-8192", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]
-        for model in preferred_models:
-            if model in available_models:
-                return model
-        if available_models:
-            return available_models[0]
-        return "llama3-8b-8192" 
-    except Exception as e:
-        logger.error(f"model pick failed: {e}")
-        return "llama3-8b-8192"
-
 # ==================== ۰. تست‌ها ====================
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🏓 پونگ! ربات کاملاً سالمه.")
@@ -166,7 +150,7 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     await msg.reply_text("⏳ در حال تست هوش مصنوعی...")
     try:
-        target_model = pick_model()
+        target_model = "llama3-8b-8192"
         res = client_ai.chat.completions.create(
             messages=[{"role": "user", "content": "فقط بنویس: تست موفق بود!"}],
             model=target_model,
@@ -230,18 +214,23 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await msg.reply_animation(animation=GIF_WARN, caption=f"⚠️ {target.first_name} اخطار گرفت! ({count}/3)", parse_mode="Markdown")
 
-# ==================== ۳. تحلیل گروه ====================
+# ==================== ۳. تحلیل گروه و پیام ====================
 async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.chat.type not in ("group", "supergroup"):
         await msg.reply_text("❌ این دستور فقط توی گروه‌ها کار می‌کنه.")
         return
 
-    await msg.reply_text("⏳ در حال تحلیل ۱۰۰ پیام اخیر گروه... (چند لحظه صبر کنید)")
+    text_parts = msg.text.strip().split()
+    limit = 100
+    if len(text_parts) > 2 and text_parts[2].isdigit():
+        limit = int(text_parts[2])
+    
+    await msg.reply_text(f"⏳ در حال تحلیل {limit} پیام اخیر گروه... (چند لحظه صبر کنید)")
     
     try:
         conn = sqlite3.connect(DB_PATH); c = conn.cursor()
-        c.execute("SELECT user_name, text FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT 100", (msg.chat_id,))
+        c.execute("SELECT user_name, text FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT ?", (msg.chat_id, limit))
         rows = c.fetchall()
         conn.close()
         
@@ -254,7 +243,7 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_text = "\n".join(messages)
 
         prompt = (
-            "تو یک تحلیل‌گر حرفه‌ای گروه‌های تلگرامی هستی. من ۱۰۰ پیام آخر این گروه را به تو می‌دهم. "
+            f"تو یک تحلیل‌گر حرفه‌ای گروه‌های تلگرامی هستی. من {len(rows)} پیام آخر این گروه را به تو می‌دهم. "
             "لطفاً یک گزارش کامل، جذاب و خوانا به زبان فارسی با ایموجی‌های مناسب تهیه کن. "
             "در گزارش به این موارد اشاره کن:\n"
             "۱. موضوع اصلی صحبت‌ها چی بوده؟\n"
@@ -264,14 +253,14 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"پیام‌ها:\n{chat_text}"
         )
 
-        target_model = pick_model()
+        target_model = "llama3-8b-8192"
         res = client_ai.chat.completions.create(
             messages=[{"role": "system", "content": "تو یک تحلیل‌گر هوشمند و دقیق هستی."}, {"role": "user", "content": prompt}],
             model=target_model,
         )
         
         analysis = res.choices[0].message.content
-        await msg.reply_text(f"📊 **تحلیل گروه:**\n\n{analysis}", parse_mode="Markdown")
+        await msg.reply_text(f"📊 **تحلیل گروه (بر اساس {len(rows)} پیام):**\n\n{analysis}", parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -306,9 +295,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• `معرفی` ← آشنایی با من\n"
         "• `آمار` ← تعداد کل پیام‌های گروه\n"
         "• `راهنما` ← همین پیام\n"
-        "• `جارویس تحلیل` ← بررسی هوشمند ۱۰۰ پیام اخیر گروه\n\n"
-        "🧠 **چت با هوش مصنوعی:**\n"
-        "کلمه `جارویس` رو بنویس یا روی پیام من ریپلای کن تا با Groq چت کنی!\n\n"
+        "• `جارویس تحلیل` ← بررسی هوشمند ۱۰۰ پیام اخیر گروه\n"
+        "• `جارویس تحلیل 50` ← تحلیل ۵۰ پیام (یا هر عددی که می‌خوای)\n\n"
+        "🧠 **چت و تحلیل هوش مصنوعی:**\n"
+        "• کلمه `جارویس` رو بنویس یا روی پیام من ریپلای کن.\n"
+        "• اگر روی یه پیام ریپلای کنی و بنویسی `جارویس این چی میگه`، من اون پیام رو تحلیل می‌کنم!\n\n"
         "💼 **چت خصوصی (منشی هوشمند):**\n"
         "اگر توی چت خصوصی پیام بدی، می‌تونی پیامت رو به مدیر برسونی یا با من چت کنی."
     )
@@ -353,8 +344,9 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_cooldowns[user_id] = current_time
     try:
         await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
+        
         user_text = msg.text.replace("جارویس", "").strip().lower()
-        if not user_text:
+        if not user_text and not is_reply_to_bot and not msg.reply_to_message:
             await msg.reply_text("بله؟ چه سوالی داری؟")
             return
             
@@ -365,14 +357,27 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🌐 سایتشون:\namirds.ir\n\n🎵 سایت موزیک:\nopenmusic.amirds.ir", parse_mode="Markdown")
             return
 
-        target_model = pick_model()
+        target_model = "llama3-8b-8192"
         system_prompt = (
             "تو یک دستیار هوشمند، بامزه و خوش‌برخورد به نام جارویس هستی. "
             "قانون مهم: تحت هیچ شرایطی خودت را به سازنده‌ات نسبت نده. "
             "جواب‌هایت باید کوتاه، مفید و دوستانه باشد."
         )
+        
+        # 🚨 قابلیت جدید: تحلیل پیام ریپلای شده
+        messages_payload = []
+        if msg.reply_to_message and (not is_reply_to_bot or "چی میگه" in user_text or "منظورش" in user_text):
+            replied_text = msg.reply_to_message.text or msg.reply_to_message.caption
+            if replied_text:
+                analysis_prompt = f"کاربر روی این پیام ریپلای کرده و پرسیده: '{user_text}'.\n\nمتن پیام اصلی:\n\"{replied_text}\"\n\nلطفاً تحلیل کن که این پیام چه معنایی داره و به سوال کاربر جواب بده."
+                messages_payload = [{"role": "system", "content": system_prompt}, {"role": "user", "content": analysis_prompt}]
+            else:
+                messages_payload = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
+        else:
+            messages_payload = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
+
         chat_completion = client_ai.chat.completions.create(
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
+            messages=messages_payload,
             model=target_model,
         )
         await msg.reply_text(chat_completion.choices[0].message.content)
@@ -479,8 +484,10 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif context.user_data.get('waiting_for_prompt'):
         try:
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
-            target_model = pick_model()
-            res = client_ai.chat.completions.create(messages=[{"role": "system", "content": "تو یک مهندس پرامپت حرفه‌ای هستی. درخواست کاربر را به یک پرامپت دقیق و ساختاریافته تبدیل کن."}, {"role": "user", "content": msg.text}], model=target_model)
+            res = client_ai.chat.completions.create(
+                messages=[{"role": "system", "content": "تو یک مهندس پرامپت حرفه‌ای هستی. درخواست کاربر را به یک پرامپت دقیق و ساختاریافته تبدیل کن."}, {"role": "user", "content": msg.text}], 
+                model="llama3-8b-8192"
+            )
             await msg.reply_text(f"✨ **پرامپت شما:**\n\n{res.choices[0].message.content}")
         except Exception as e:
             logger.error(f"prompt error: {e}")
@@ -489,13 +496,14 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif context.user_data.get('ai_mode'):
         try:
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
-            target_model = pick_model()
-            res = client_ai.chat.completions.create(messages=[{"role": "system", "content": "تو یک دستیار هوشمند به نام جارویس هستی."}, {"role": "user", "content": msg.text}], model=target_model)
+            res = client_ai.chat.completions.create(
+                messages=[{"role": "system", "content": "تو یک دستیار هوشمند به نام جارویس هستی."}, {"role": "user", "content": msg.text}], 
+                model="llama3-8b-8192"
+            )
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
             logger.error(f"ai private error: {e}")
-            error_text = str(e)
-            await msg.reply_text(f"❌ خطای هوش مصنوعی:\n\n`{error_text}`", parse_mode="Markdown")
+            await msg.reply_text(f"❌ خطای هوش مصنوعی:\n\n`{str(e)}`", parse_mode="Markdown")
     else:
         await msg.reply_text("سلام! برای استفاده از منوی ربات دستور /start رو بزن. اگرم می‌خوای پیامت به امیر برسه، دکمه «ارسال پیام به امیر» رو بزن.")
 
@@ -507,13 +515,15 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     
     if msg.from_user and msg.chat.type in ("group", "supergroup"):
         update_stats(msg.chat_id, msg.from_user.id)
+        
         if msg.text and not msg.text.startswith("/") and msg.from_user:
             try:
                 conn = sqlite3.connect(DB_PATH); c = conn.cursor()
                 c.execute("INSERT INTO group_messages (chat_id, user_name, text) VALUES (?, ?, ?)", 
                           (msg.chat_id, msg.from_user.first_name, msg.text))
+                
                 c.execute("""DELETE FROM group_messages WHERE chat_id=? AND id NOT IN 
-                             (SELECT id FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT 200)""", (msg.chat_id, msg.chat_id))
+                             (SELECT id FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT 100)""", (msg.chat_id, msg.chat_id))
                 conn.commit(); conn.close()
             except Exception as e:
                 logger.error(f"DB save error: {e}")
@@ -529,7 +539,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text == "معرفی": await introduce_jarvis(update, context)
     elif text == "آمار": await stats(update, context)
     elif text == "راهنما": await help_command(update, context)
-    elif text == "جارویس تحلیل": await analyze_group(update, context)
+    elif text.startswith("جارویس تحلیل"): await analyze_group(update, context)
     elif text.startswith("ضد لینک روشن"):
         if await is_admin(msg.chat_id, msg.from_user.id, context):
             set_setting(msg.chat_id, "anti_link", 1)
