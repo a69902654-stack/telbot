@@ -15,7 +15,7 @@ from telegram.ext import (
 # ==================== ⚠️ تنظیمات ====================
 TOKEN = os.environ.get("TOKEN", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-YOUR_TELEGRAM_ID = int(os.environ.get("YOUR_TELEGRAM_ID", "0"))
+YOUR_TELEGRAM_ID = 7014212980  # آیدی عددی شما به صورت مستقیم قرار گرفت
 
 if not TOKEN:
     raise ValueError("TOKEN environment variable not set!")
@@ -33,6 +33,8 @@ DB_PATH = "jarvis.db"
 GIF_WARN = "https://media.giphy.com/media/l41Yf04O28F8Z0jBK/giphy.gif"
 GIF_MUTE = "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif"
 GIF_INTRO = "https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"
+GIF_HELP = "https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif" 
+GIF_SECRETARY = "https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"
 
 # ==================== Health Check (برای Render) ====================
 class HealthHandler(BaseHTTPRequestHandler):
@@ -143,27 +145,20 @@ def pick_model():
     try:
         models = client_ai.models.list()
         available_models = [m.id for m in models.data]
-        
-        # لیست مدل‌های جدید و قدرتمند Groq به ترتیب اولویت
-        preferred_models = [
-            "llama-3.3-70b-versatile",
-            "llama-3.1-8b-instant",
-            "mixtral-8x7b-32768",
-            "gemma2-9b-it"
-        ]
-        
+        preferred_models = ["llama3-8b-8192", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "gemma2-9b-it"]
         for model in preferred_models:
             if model in available_models:
                 return model
-                
-        return "llama-3.3-70b-versatile" # اگر هیچ کدوم نبود، این رو امتحان کن
+        if available_models:
+            return available_models[0]
+        return "llama3-8b-8192" 
     except Exception as e:
         logger.error(f"model pick failed: {e}")
-        return "llama-3.3-70b-versatile"
+        return "llama3-8b-8192"
 
-# ==================== ۰. تست پینگ و ای‌آی ====================
+# ==================== ۰. تست‌ها ====================
 async def ping_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🏓 پونگ! ربات کاملاً سالمه و به دیتابیس و تلگرام دسترسی داره.")
+    await update.message.reply_text("🏓 پونگ! ربات کاملاً سالمه.")
 
 async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -178,7 +173,7 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.reply_text(f"❌ اتصال به Groq شکست خورد:\n\n`{str(e)}`", parse_mode="Markdown")
 
-# ==================== ۱. خوش‌آمدگویی گروه ====================
+# ==================== ۱. خوش‌آمدگویی و منشی ====================
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     was = result.old_chat_member.status in ("left", "kicked")
@@ -196,7 +191,7 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await context.bot.send_message(chat_id=chat_id, text=welcome, parse_mode="Markdown")
 
-# ==================== ۲. سیستم سیک ====================
+# ==================== ۲. سیستم سیک و اخطار ====================
 async def handle_sik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text: return
@@ -217,7 +212,6 @@ async def handle_sik(update: Update, context: ContextTypes.DEFAULT_TYPE):
         unmute_user(msg.chat_id, target.id)
         await msg.reply_text(f"🔊 {target.first_name} آزاد شد! می‌تونه چت کنه.", parse_mode="Markdown")
 
-# ==================== ۳. اخطار ====================
 async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg.reply_to_message or not msg.reply_to_message.from_user:
@@ -234,26 +228,63 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await msg.reply_animation(animation=GIF_WARN, caption=f"⚠️ {target.first_name} اخطار گرفت! ({count}/3)", parse_mode="Markdown")
 
-# ==================== ۴. معرفی ====================
+# ==================== ۳. تحلیل گروه ====================
+async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if msg.chat.type not in ("group", "supergroup"):
+        await msg.reply_text("❌ این دستور فقط توی گروه‌ها کار می‌کنه.")
+        return
+
+    await msg.reply_text("⏳ در حال جمع‌آوری و تحلیل ۱۰۰ پیام اخیر گروه... (چند لحظه صبر کنید)")
+    
+    try:
+        # گرفتن ۱۰۰ پیام اخیر
+        messages = []
+        async for message in context.bot.get_chat_history(chat_id=msg.chat_id, limit=100):
+            if message.text and not message.text.startswith("/"):
+                user = message.from_user.first_name if message.from_user else "ناشناس"
+                messages.append(f"{user}: {message.text}")
+        
+        messages.reverse()  # از قدیم به جدید
+        chat_text = "\n".join(messages)
+        
+        if not chat_text:
+            await msg.reply_text("❌ پیامی برای تحلیل پیدا نشد.")
+            return
+
+        prompt = (
+            "تو یک تحلیل‌گر حرفه‌ای گروه‌های تلگرامی هستی. من ۱۰۰ پیام آخر این گروه را به تو می‌دهم. "
+            "لطفاً یک گزارش کامل، جذاب و خوانا به زبان فارسی با ایموجی‌های مناسب تهیه کن. "
+            "در گزارش به این موارد اشاره کن:\n"
+            "۱. موضوع اصلی صحبت‌ها چی بوده؟\n"
+            "۲. فعال‌ترین کاربران چه کسانی بودند؟\n"
+            "۳. آیا مکالمات مفید و سازنده بوده یا نه؟\n"
+            "۴. یک جمع‌بندی کوتاه و پیشنهاد برای بهتر شدن گروه.\n\n"
+            f"پیام‌ها:\n{chat_text}"
+        )
+
+        target_model = pick_model()
+        res = client_ai.chat.completions.create(
+            messages=[{"role": "system", "content": "تو یک تحلیل‌گر هوشمند و دقیق هستی."}, {"role": "user", "content": prompt}],
+            model=target_model,
+        )
+        
+        analysis = res.choices[0].message.content
+        await msg.reply_text(f"📊 **تحلیل گروه:**\n\n{analysis}")
+        
+    except Exception as e:
+        logger.error(f"Analysis error: {e}")
+        await msg.reply_text(f"❌ خطا در تحلیل گروه:\n`{str(e)}`", parse_mode="Markdown")
+
+# ==================== ۴. معرفی و راهنما ====================
 async def introduce_jarvis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     intro_text = (
         "🤖 **سلام! من جارویس هستم.**\n\n"
         "من دستیار هوشمند و برنامه‌نویسی‌شده توسط **امیرارسلان** هستم. 🧑‍💻\n"
         "وظیفه من مدیریت گروه، سرگرمی و کمک به شماست.\n\n"
-        "🔹 **کارهایی که می‌تونم انجام بدم:**\n"
-        "• خوش‌آمدگویی با گیف به اعضای جدید 🎉\n"
-        "• سکوت و رفع سکوت کاربران (سیک / رفع سیک) 🔇\n"
-        "• اخطار دادن به کاربران خاطی (اخطار) ⚠️\n"
-        "• حذف لینک‌های تبلیغاتی (ضد لینک) 🚫\n"
-        "• ثبت و مشاهده آگهی‌ها (در چت خصوصی) 📢\n"
-        "• درخواست ساخت ربات 🤖\n"
-        "• ساخت پرامپت حرفه‌ای ✍️\n"
-        "• چت با هوش مصنوعی 🧠\n\n"
-        "🌐 **سایت اصلی من:**\n"
-        "[amirds.ir](https://amirds.ir)\n\n"
-        "🎵 **سایت موزیک من:**\n"
-        "[openmusic.amirds.ir](https://openmusic.amirds.ir/)\n\n"
+        "🌐 **سایت اصلی من:**\n[amirds.ir](https://amirds.ir)\n"
+        "🎵 **سایت موزیک من:**\n[openmusic.amirds.ir](https://openmusic.amirds.ir/)\n\n"
         "برای صدا زدن من، فقط کلمه **جارویس** رو بنویس. 😉"
     )
     try:
@@ -261,7 +292,30 @@ async def introduce_jarvis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await msg.reply_text(intro_text, parse_mode="Markdown", disable_web_page_preview=True)
 
-# ==================== ۵. آمار ====================
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    help_text = (
+        "✨ **راهنمای جامع جارویس** ✨\n\n"
+        "👑 **دستورات مدیریتی (ویژه ادمین‌ها):**\n"
+        "• `سیک` (ریپلای) ← سکوت کاربر\n"
+        "• `رفع سیک` (ریپلای) ← آزاد کردن کاربر\n"
+        "• `اخطار` (ریپلای) ← ثبت اخطار (۳ اخطار = سکوت)\n"
+        "• `ضد لینک روشن / خاموش` ← مدیریت لینک‌ها\n\n"
+        "🎮 **دستورات عمومی گروه:**\n"
+        "• `معرفی` ← آشنایی با من\n"
+        "• `آمار` ← تعداد کل پیام‌های گروه\n"
+        "• `راهنما` ← همین پیام\n"
+        "• `جارویس تحلیل` ← بررسی هوشمند ۱۰۰ پیام اخیر گروه\n\n"
+        "🧠 **چت با هوش مصنوعی:**\n"
+        "کلمه `جارویس` رو بنویس یا روی پیام من ریپلای کن تا با Groq چت کنی!\n\n"
+        "💼 **چت خصوصی (منشی هوشمند):**\n"
+        "اگر توی چت خصوصی پیام بدی، می‌تونی پیامت رو به مدیر برسونی یا با من چت کنی."
+    )
+    try:
+        await msg.reply_animation(animation=GIF_HELP, caption=help_text, parse_mode="Markdown")
+    except:
+        await msg.reply_text(help_text, parse_mode="Markdown")
+
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
@@ -270,7 +324,7 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     await msg.reply_text(f"📊 **آمار گروه:**\n\nتعداد کل پیام‌ها: {total_msgs}", parse_mode="Markdown")
 
-# ==================== ۶. ضد لینک ====================
+# ==================== ۵. ضد لینک و هوش مصنوعی ====================
 async def check_anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text: return
@@ -282,7 +336,6 @@ async def check_anti_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await msg.reply_text(f"⚠️ {msg.from_user.first_name}، ارسال لینک مجاز نیست!", parse_mode="Markdown")
                 except: pass
 
-# ==================== ۷. هوش مصنوعی ====================
 user_cooldowns = {}
 
 async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -307,59 +360,42 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         creator_keywords = ["سازنده", "کی ساختت", "کی ساخته", "صاحبت", "مالک", "توسعه دهنده", "توسعه‌دهنده", "برنامه نویس", "برنامه‌نویس", "کی درستت کرده"]
         if any(keyword in user_text for keyword in creator_keywords):
             await msg.reply_text(
-                "🧑‍💻 من توسط **امیرارسلان** ساخته شدم!\n"
-                "ایشون یک برنامه‌نویس و توسعه‌دهنده وب هستن.\n\n"
-                "🌐 می‌تونید به سایتشون سر بزنید:\n"
-                "amirds.ir\n\n"
-                "🎵 و یا از سایت موزیکشون استفاده کنید:\n"
-                "openmusic.amirds.ir",
-                parse_mode="Markdown"
-            )
+                "🧑‍💻 من توسط **امیرارسلان** ساخته شدم!\nایشون یک برنامه‌نویس و توسعه‌دهنده وب هستن.\n\n"
+                "🌐 سایتشون:\namirds.ir\n\n🎵 سایت موزیک:\nopenmusic.amirds.ir", parse_mode="Markdown")
             return
 
         target_model = pick_model()
         system_prompt = (
             "تو یک دستیار هوشمند، بامزه و خوش‌برخورد به نام جارویس هستی. "
-            "قانون مهم: تحت هیچ شرایطی در مکالمات عادی، خودت به سازنده‌ات (امیرارسلان) اشاره نکن. "
-            "جواب‌هایت باید کوتاه، مفید، دوستانه و همراه با ایموجی باشد."
+            "قانون مهم: تحت هیچ شرایطی خودت را به سازنده‌ات نسبت نده. "
+            "جواب‌هایت باید کوتاه، مفید و دوستانه باشد."
         )
-        
         chat_completion = client_ai.chat.completions.create(
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}],
             model=target_model,
         )
-        
         await msg.reply_text(chat_completion.choices[0].message.content)
-        
     except Exception as e:
         logger.error(f"خطای هوش مصنوعی: {e}")
-        error_text = str(e)
-        if "401" in error_text or "Unauthorized" in error_text:
-            await msg.reply_text("❌ خطا: کلید API (GROQ_API_KEY) نامعتبر است. لطفاً آن را در Render چک کنید.")
-        elif "429" in error_text or "Rate Limit" in error_text:
-            await msg.reply_text("❌ خطا: محدودیت درخواست به Groq. لطفاً چند لحظه دیگر امتحان کنید.")
-        elif "404" in error_text or "model_not_found" in error_text:
-            await msg.reply_text(f"❌ خطا: مدل `{target_model}` در Groq پیدا نشد.")
-        else:
-            await msg.reply_text(f"❌ خطا در اتصال به هوش مصنوعی:\n`{error_text}`", parse_mode="Markdown")
+        await msg.reply_text("❌ متاسفانه الان نمی‌تونم به هوش مصنوعی وصل بشم.")
 
-# ==================== ۸. چت خصوصی ====================
+# ==================== ۶. چت خصوصی (منشی) ====================
 async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not user: return
-    welcome_text = f"سلام {user.first_name}! 👋\nمن جارویس هستم، دستیار هوشمند شما.\n\n👇 یکی از گزینه‌های زیر رو انتخاب کن:"
+    welcome_text = f"سلام {user.first_name}! 👋\nمن جارویس هستم، دستیار هوشمند و منشی امیرارسلان.\n\n👇 یکی از گزینه‌های زیر رو انتخاب کن:"
     keyboard = [
         [InlineKeyboardButton("🤖 چت با هوش مصنوعی", callback_data="priv_ai")],
+        [InlineKeyboardButton("📩 ارسال پیام به امیر", callback_data="priv_msg_admin")],
         [InlineKeyboardButton("📝 بیوگرافی من", callback_data="priv_bio")],
-        [InlineKeyboardButton("📢 ثبت آگهی جدید", callback_data="priv_add_ad")],
+        [InlineKeyboardButton("📢 ثبت آگهی", callback_data="priv_add_ad")],
         [InlineKeyboardButton("📋 مشاهده آگهی‌ها", callback_data="priv_view_ads")],
-        [InlineKeyboardButton("✍️ ساخت پرامپت حرفه‌ای", callback_data="priv_prompt")],
-        [InlineKeyboardButton("🤖 درخواست ساخت ربات", callback_data="priv_req_bot")],
+        [InlineKeyboardButton("✍️ ساخت پرامپت", callback_data="priv_prompt")],
         [InlineKeyboardButton("🌐 سایت من", url="https://amirds.ir"), InlineKeyboardButton("🎵 سایت موزیک", url="https://openmusic.amirds.ir/")],
-        [InlineKeyboardButton("📜 راهنمای دستورات", callback_data="priv_help")],
+        [InlineKeyboardButton("📜 راهنما", callback_data="priv_help")],
     ]
     try:
-        await update.message.reply_animation(animation=GIF_INTRO, caption=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+        await update.message.reply_animation(animation=GIF_SECRETARY, caption=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     except:
         await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -375,6 +411,9 @@ async def private_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "priv_ai":
         await context.bot.send_message(chat_id=user_id, text="🧠 حالت چت با هوش مصنوعی فعال شد.\n\nسوالت رو بپرس. (برای خروج /start)")
         context.user_data.clear(); context.user_data['ai_mode'] = True
+    elif data == "priv_msg_admin":
+        await context.bot.send_message(chat_id=user_id, text="📩 هر پیامی که الان بفرستی، مستقیماً برای امیرارسلان فرستاده میشه.\n(برای انصراف /start رو بزن)")
+        context.user_data.clear(); context.user_data['waiting_to_msg_admin'] = True
     elif data == "priv_bio":
         bio = get_bio(user_id)
         if bio: await context.bot.send_message(chat_id=user_id, text=f"📝 بیوگرافی شما:\n{bio}\n\nمتن جدید رو بفرست.")
@@ -400,24 +439,21 @@ async def private_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "priv_prompt":
         await context.bot.send_message(chat_id=user_id, text="✍️ توضیح بده چه پرامپتی می‌خوای؟")
         context.user_data.clear(); context.user_data['waiting_for_prompt'] = True
-    elif data == "priv_req_bot":
-        await context.bot.send_message(chat_id=user_id, text="🤖 اسم رباتی که می‌خوای رو بنویس:")
-        context.user_data.clear(); context.user_data['req_bot_step'] = 'name'
     elif data == "priv_back":
         welcome_text = "👇 یکی از گزینه‌های زیر رو انتخاب کن:"
         keyboard = [
             [InlineKeyboardButton("🤖 چت با هوش مصنوعی", callback_data="priv_ai")],
+            [InlineKeyboardButton("📩 ارسال پیام به امیر", callback_data="priv_msg_admin")],
             [InlineKeyboardButton("📝 بیوگرافی من", callback_data="priv_bio")],
-            [InlineKeyboardButton("📢 ثبت آگهی جدید", callback_data="priv_add_ad")],
+            [InlineKeyboardButton("📢 ثبت آگهی", callback_data="priv_add_ad")],
             [InlineKeyboardButton("📋 مشاهده آگهی‌ها", callback_data="priv_view_ads")],
-            [InlineKeyboardButton("✍️ ساخت پرامپت حرفه‌ای", callback_data="priv_prompt")],
-            [InlineKeyboardButton("🤖 درخواست ساخت ربات", callback_data="priv_req_bot")],
+            [InlineKeyboardButton("✍️ ساخت پرامپت", callback_data="priv_prompt")],
             [InlineKeyboardButton("🌐 سایت من", url="https://amirds.ir"), InlineKeyboardButton("🎵 سایت موزیک", url="https://openmusic.amirds.ir/")],
-            [InlineKeyboardButton("📜 راهنمای دستورات", callback_data="priv_help")],
+            [InlineKeyboardButton("📜 راهنما", callback_data="priv_help")],
         ]
         await context.bot.send_message(chat_id=user_id, text=welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
     elif data == "priv_help":
-        await context.bot.send_message(chat_id=user_id, text="📜 راهنما:\n• چت با هوش مصنوعی\n• بیوگرافی\n• ثبت و مشاهده آگهی\n• ساخت پرامپت\n• درخواست ربات\nبرای بازگشت /start")
+        await context.bot.send_message(chat_id=user_id, text="📜 راهنما:\n• چت با هوش مصنوعی\n• ارسال پیام به امیر\n• ثبت آگهی\n• ساخت پرامپت\nبرای بازگشت /start")
 
 async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message; user_id = msg.from_user.id
@@ -429,6 +465,15 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear(); await msg.reply_text("✅ آگهی ثبت شد!")
     elif context.user_data.get('waiting_for_bio'):
         set_bio_db(user_id, msg.text); context.user_data.clear(); await msg.reply_text("✅ بیوگرافی ذخیره شد!")
+    elif context.user_data.get('waiting_to_msg_admin'):
+        try:
+            admin_text = f"📩 **پیام جدید از طرف ربات:**\n\n👤 نام: {msg.from_user.first_name}\n🆔 آیدی: `{user_id}`\n🔗 یوزرنیم: @{msg.from_user.username if msg.from_user.username else 'ندارد'}\n\n💬 متن پیام:\n{msg.text}"
+            await context.bot.send_message(chat_id=YOUR_TELEGRAM_ID, text=admin_text, parse_mode="Markdown")
+            await msg.reply_text("✅ پیام شما با موفقیت برای امیرارسلان ارسال شد. به زودی پاسخ میده!")
+        except Exception as e:
+            logger.error(f"Error sending to admin: {e}")
+            await msg.reply_text("❌ متاسفانه در ارسال پیام مشکلی پیش آمد.")
+        context.user_data.clear()
     elif context.user_data.get('waiting_for_prompt'):
         try:
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
@@ -439,19 +484,6 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"prompt error: {e}")
             await msg.reply_text("❌ خطا در ساخت پرامپت.")
         context.user_data.clear()
-    elif context.user_data.get('req_bot_step') == 'name':
-        context.user_data['req_bot_name'] = msg.text; context.user_data['req_bot_step'] = 'desc'
-        await msg.reply_text("📝 توضیحات و امکانات ربات رو بنویس:")
-    elif context.user_data.get('req_bot_step') == 'desc':
-        bot_name = context.user_data.get('req_bot_name'); bot_desc = msg.text
-        user_link = f"https://t.me/{msg.from_user.username}" if msg.from_user.username else "ندارد"
-        admin_text = f"📥 درخواست ربات:\n👤 {msg.from_user.first_name}\n🔗 {user_link}\n🆔 {user_id}\n\n🤖 {bot_name}\n📝 {bot_desc}"
-        try:
-            await context.bot.send_message(chat_id=YOUR_TELEGRAM_ID, text=admin_text)
-            await msg.reply_text("✅ درخواست برای سازنده ارسال شد!")
-        except:
-            await msg.reply_text("❌ خطا در ارسال درخواست.")
-        context.user_data.clear()
     elif context.user_data.get('ai_mode'):
         try:
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
@@ -460,16 +492,12 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
             logger.error(f"ai private error: {e}")
-            error_text = str(e)
-            if "401" in error_text or "Unauthorized" in error_text:
-                await msg.reply_text("❌ خطا: کلید API (GROQ_API_KEY) نامعتبر است.")
-            else:
-                await msg.reply_text(f"❌ خطا در اتصال به هوش مصنوعی:\n`{error_text}`", parse_mode="Markdown")
+            await msg.reply_text("❌ خطا در اتصال به هوش مصنوعی.")
+    else:
+        # اگر ربات در حالت خاصی نبود (پیام معمولی)
+        await msg.reply_text("سلام! برای استفاده از منوی ربات دستور /start رو بزن. اگرم می‌خوای پیامت به امیر برسه، دکمه «ارسال پیام به امیر» رو بزن.")
 
-# ==================== ۹. مدیریت پیام‌های گروه ====================
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 راهنمای جارویس\n\n👑 ادمین‌ها:\n• سیک / رفع سیک (ریپلای)\n• اخطار (ریپلای)\n• ضد لینک روشن / خاموش\n\n🎮 کاربران:\n• معرفی | آمار | راهنما | تست‌ای‌آی\n\n🧠 چت با هوش مصنوعی:\nکلمه جارویس رو بنویس یا ریپلای کن!")
-
+# ==================== ۷. مدیریت پیام‌های گروه ====================
 async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg: return
@@ -487,7 +515,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text == "معرفی": await introduce_jarvis(update, context)
     elif text == "آمار": await stats(update, context)
     elif text == "راهنما": await help_command(update, context)
-    elif text == "بازی": await context.bot.send_message(chat_id=msg.chat_id, text="🎲 به زودی!")
+    elif text == "جارویس تحلیل": await analyze_group(update, context)
     elif text.startswith("ضد لینک روشن"):
         if await is_admin(msg.chat_id, msg.from_user.id, context):
             set_setting(msg.chat_id, "anti_link", 1)
