@@ -150,7 +150,8 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     await msg.reply_text("⏳ در حال تست هوش مصنوعی...")
     try:
-        target_model = "llama3-8b-8192"
+        # مدل جدید و پیشنهادی خود Groq
+        target_model = "openai/gpt-oss-20b"
         res = client_ai.chat.completions.create(
             messages=[{"role": "user", "content": "فقط بنویس: تست موفق بود!"}],
             model=target_model,
@@ -253,7 +254,8 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"پیام‌ها:\n{chat_text}"
         )
 
-        target_model = "llama3-8b-8192"
+        # مدل جدید و پیشنهادی خود Groq
+        target_model = "openai/gpt-oss-20b"
         res = client_ai.chat.completions.create(
             messages=[{"role": "system", "content": "تو یک تحلیل‌گر هوشمند و دقیق هستی."}, {"role": "user", "content": prompt}],
             model=target_model,
@@ -357,14 +359,15 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🌐 سایتشون:\namirds.ir\n\n🎵 سایت موزیک:\nopenmusic.amirds.ir", parse_mode="Markdown")
             return
 
-        target_model = "llama3-8b-8192"
+        # مدل جدید و پیشنهادی خود Groq
+        target_model = "openai/gpt-oss-20b"
         system_prompt = (
             "تو یک دستیار هوشمند، بامزه و خوش‌برخورد به نام جارویس هستی. "
             "قانون مهم: تحت هیچ شرایطی خودت را به سازنده‌ات نسبت نده. "
             "جواب‌هایت باید کوتاه، مفید و دوستانه باشد."
         )
         
-        # 🚨 قابلیت جدید: تحلیل پیام ریپلای شده
+        # 🚨 قابلیت تحلیل پیام ریپلای شده
         messages_payload = []
         if msg.reply_to_message and (not is_reply_to_bot or "چی میگه" in user_text or "منظورش" in user_text):
             replied_text = msg.reply_to_message.text or msg.reply_to_message.caption
@@ -486,7 +489,7 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
             res = client_ai.chat.completions.create(
                 messages=[{"role": "system", "content": "تو یک مهندس پرامپت حرفه‌ای هستی. درخواست کاربر را به یک پرامپت دقیق و ساختاریافته تبدیل کن."}, {"role": "user", "content": msg.text}], 
-                model="llama3-8b-8192"
+                model="openai/gpt-oss-20b"
             )
             await msg.reply_text(f"✨ **پرامپت شما:**\n\n{res.choices[0].message.content}")
         except Exception as e:
@@ -498,7 +501,7 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
             res = client_ai.chat.completions.create(
                 messages=[{"role": "system", "content": "تو یک دستیار هوشمند به نام جارویس هستی."}, {"role": "user", "content": msg.text}], 
-                model="llama3-8b-8192"
+                model="openai/gpt-oss-20b"
             )
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
