@@ -15,7 +15,7 @@ from telegram.ext import (
 # ==================== ⚠️ تنظیمات ====================
 TOKEN = os.environ.get("TOKEN", "")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-YOUR_TELEGRAM_ID = 7014212980  # آیدی عددی شما به صورت مستقیم قرار گرفت
+YOUR_TELEGRAM_ID = 7014212980  # آیدی عددی شما
 
 if not TOKEN:
     raise ValueError("TOKEN environment variable not set!")
@@ -62,6 +62,8 @@ def init_db():
     c.execute("""CREATE TABLE IF NOT EXISTS bios (user_id INTEGER PRIMARY KEY, bio_text TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS message_stats (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY (chat_id, user_id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS ads (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, category TEXT, title TEXT, description TEXT, date TEXT)""")
+    # جدول جدید برای ذخیره پیام‌ها جهت تحلیل
+    c.execute("""CREATE TABLE IF NOT EXISTS group_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER, user_name TEXT, text TEXT)""")
     conn.commit()
     conn.close()
 
@@ -173,7 +175,7 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         await msg.reply_text(f"❌ اتصال به Groq شکست خورد:\n\n`{str(e)}`", parse_mode="Markdown")
 
-# ==================== ۱. خوش‌آمدگویی و منشی ====================
+# ==================== ۱. خوش‌آمدگویی ====================
 async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = update.chat_member
     was = result.old_chat_member.status in ("left", "kicked")
@@ -191,7 +193,7 @@ async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         await context.bot.send_message(chat_id=chat_id, text=welcome, parse_mode="Markdown")
 
-# ==================== ۲. سیستم سیک و اخطار ====================
+# ==================== ۲. سیک و اخطار ====================
 async def handle_sik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg or not msg.text: return
@@ -235,22 +237,21 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.reply_text("❌ این دستور فقط توی گروه‌ها کار می‌کنه.")
         return
 
-    await msg.reply_text("⏳ در حال جمع‌آوری و تحلیل ۱۰۰ پیام اخیر گروه... (چند لحظه صبر کنید)")
+    await msg.reply_text("⏳ در حال تحلیل ۱۰۰ پیام اخیر گروه... (چند لحظه صبر کنید)")
     
     try:
-        # گرفتن ۱۰۰ پیام اخیر
-        messages = []
-        async for message in context.bot.get_chat_history(chat_id=msg.chat_id, limit=100):
-            if message.text and not message.text.startswith("/"):
-                user = message.from_user.first_name if message.from_user else "ناشناس"
-                messages.append(f"{user}: {message.text}")
+        conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+        c.execute("SELECT user_name, text FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT 100", (msg.chat_id,))
+        rows = c.fetchall()
+        conn.close()
         
-        messages.reverse()  # از قدیم به جدید
-        chat_text = "\n".join(messages)
-        
-        if not chat_text:
-            await msg.reply_text("❌ پیامی برای تحلیل پیدا نشد.")
+        if not rows:
+            await msg.reply_text("❌ هنوز پیامی برای تحلیل ذخیره نشده. (ربات از زمان روشن شدنش پیام‌ها رو ذخیره می‌کنه).")
             return
+            
+        messages = [f"{row[0]}: {row[1]}" for row in rows]
+        messages.reverse() 
+        chat_text = "\n".join(messages)
 
         prompt = (
             "تو یک تحلیل‌گر حرفه‌ای گروه‌های تلگرامی هستی. من ۱۰۰ پیام آخر این گروه را به تو می‌دهم. "
@@ -270,7 +271,7 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         analysis = res.choices[0].message.content
-        await msg.reply_text(f"📊 **تحلیل گروه:**\n\n{analysis}")
+        await msg.reply_text(f"📊 **تحلیل گروه:**\n\n{analysis}", parse_mode="Markdown")
         
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -376,8 +377,9 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await msg.reply_text(chat_completion.choices[0].message.content)
     except Exception as e:
-        logger.error(f"خطای هوش مصنوعی: {e}")
-        await msg.reply_text("❌ متاسفانه الان نمی‌تونم به هوش مصنوعی وصل بشم.")
+        logger.error(f"خطای هوش مصنوعی در گروه: {e}")
+        error_text = str(e)
+        await msg.reply_text(f"❌ خطای هوش مصنوعی:\n\n`{error_text}`", parse_mode="Markdown")
 
 # ==================== ۶. چت خصوصی (منشی) ====================
 async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -492,9 +494,9 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
             logger.error(f"ai private error: {e}")
-            await msg.reply_text("❌ خطا در اتصال به هوش مصنوعی.")
+            error_text = str(e)
+            await msg.reply_text(f"❌ خطای هوش مصنوعی:\n\n`{error_text}`", parse_mode="Markdown")
     else:
-        # اگر ربات در حالت خاصی نبود (پیام معمولی)
         await msg.reply_text("سلام! برای استفاده از منوی ربات دستور /start رو بزن. اگرم می‌خوای پیامت به امیر برسه، دکمه «ارسال پیام به امیر» رو بزن.")
 
 # ==================== ۷. مدیریت پیام‌های گروه ====================
@@ -502,8 +504,20 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     msg = update.message
     if not msg: return
     text = msg.text.strip().lower() if msg.text else ""
+    
     if msg.from_user and msg.chat.type in ("group", "supergroup"):
         update_stats(msg.chat_id, msg.from_user.id)
+        if msg.text and not msg.text.startswith("/") and msg.from_user:
+            try:
+                conn = sqlite3.connect(DB_PATH); c = conn.cursor()
+                c.execute("INSERT INTO group_messages (chat_id, user_name, text) VALUES (?, ?, ?)", 
+                          (msg.chat_id, msg.from_user.first_name, msg.text))
+                c.execute("""DELETE FROM group_messages WHERE chat_id=? AND id NOT IN 
+                             (SELECT id FROM group_messages WHERE chat_id=? ORDER BY id DESC LIMIT 200)""", (msg.chat_id, msg.chat_id))
+                conn.commit(); conn.close()
+            except Exception as e:
+                logger.error(f"DB save error: {e}")
+
     if msg.from_user and is_muted(msg.chat_id, msg.from_user.id):
         try: await msg.delete()
         except: pass
