@@ -36,6 +36,13 @@ GIF_INTRO = "https://media.giphy.com/media/26tn33aiTi1jkl6H6/giphy.gif"
 GIF_HELP = "https://media.giphy.com/media/l0HlvtIPzPdt2usKs/giphy.gif" 
 GIF_SECRETARY = "https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"
 
+# گیف‌های مودها
+GIF_RUDE_ON = "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif" 
+GIF_RUDE_OFF = "https://media.giphy.com/media/l0MYB8Ory7Hqefo9a/giphy.gif"
+GIF_LOVE_ON = "https://media.giphy.com/media/26BRv0ThflsHCqDrG/giphy.gif"
+GIF_LOVE_OFF = "https://media.giphy.com/media/l41Yh1DqxJkO5W9aM/giphy.gif"
+GIF_NORMAL_ON = "https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif"
+
 # ==================== Health Check (برای Render) ====================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -57,7 +64,7 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS muted_users (chat_id INTEGER, user_id INTEGER, muted_by INTEGER, muted_at TEXT, PRIMARY KEY (chat_id, user_id))""")
-    c.execute("""CREATE TABLE IF NOT EXISTS chat_settings (chat_id INTEGER PRIMARY KEY, welcome_gif TEXT, anti_link INTEGER, rules TEXT)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS chat_settings (chat_id INTEGER PRIMARY KEY, welcome_gif TEXT, anti_link INTEGER, rules TEXT, current_mode TEXT DEFAULT 'normal')""")
     c.execute("""CREATE TABLE IF NOT EXISTS warns (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY (chat_id, user_id))""")
     c.execute("""CREATE TABLE IF NOT EXISTS bios (user_id INTEGER PRIMARY KEY, bio_text TEXT)""")
     c.execute("""CREATE TABLE IF NOT EXISTS message_stats (chat_id INTEGER, user_id INTEGER, count INTEGER, PRIMARY KEY (chat_id, user_id))""")
@@ -66,6 +73,7 @@ def init_db():
     conn.commit()
     conn.close()
 
+# ==================== توابع دیتابیس ====================
 def add_ad(user_id, category, title, description):
     conn = sqlite3.connect(DB_PATH); c = conn.cursor()
     date = datetime.now().strftime("%Y-%m-%d")
@@ -150,8 +158,7 @@ async def test_ai_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     await msg.reply_text("⏳ در حال تست هوش مصنوعی...")
     try:
-        # مدل جدید و پیشنهادی خود Groq
-        target_model = "openai/gpt-oss-20b"
+        target_model = "openai/gpt-oss-120b"
         res = client_ai.chat.completions.create(
             messages=[{"role": "user", "content": "فقط بنویس: تست موفق بود!"}],
             model=target_model,
@@ -215,7 +222,7 @@ async def warn_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await msg.reply_animation(animation=GIF_WARN, caption=f"⚠️ {target.first_name} اخطار گرفت! ({count}/3)", parse_mode="Markdown")
 
-# ==================== ۳. تحلیل گروه و پیام ====================
+# ==================== ۳. تحلیل گروه ====================
 async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if msg.chat.type not in ("group", "supergroup"):
@@ -254,15 +261,14 @@ async def analyze_group(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"پیام‌ها:\n{chat_text}"
         )
 
-        # مدل جدید و پیشنهادی خود Groq
-        target_model = "openai/gpt-oss-20b"
+        target_model = "openai/gpt-oss-120b"
         res = client_ai.chat.completions.create(
             messages=[{"role": "system", "content": "تو یک تحلیل‌گر هوشمند و دقیق هستی."}, {"role": "user", "content": prompt}],
             model=target_model,
         )
         
         analysis = res.choices[0].message.content
-        await msg.reply_text(f"📊 **تحلیل گروه (بر اساس {len(rows)} پیام):**\n\n{analysis}", parse_mode="Markdown")
+        await msg.reply_text(f"📊 تحلیل گروه (بر اساس {len(rows)} پیام):\n\n{analysis}")
         
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -289,21 +295,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "✨ **راهنمای جامع جارویس** ✨\n\n"
         "👑 **دستورات مدیریتی (ویژه ادمین‌ها):**\n"
-        "• `سیک` (ریپلای) ← سکوت کاربر\n"
-        "• `رفع سیک` (ریپلای) ← آزاد کردن کاربر\n"
-        "• `اخطار` (ریپلای) ← ثبت اخطار (۳ اخطار = سکوت)\n"
-        "• `ضد لینک روشن / خاموش` ← مدیریت لینک‌ها\n\n"
+        "• `سیک` / `رفع سیک` (ریپلای)\n"
+        "• `اخطار` (ریپلای)\n"
+        "• `ضد لینک روشن / خاموش`\n"
+        "• `خشن مود فعال` / `خشن مود خاموش`\n"
+        "• `عاشقی مود فعال` / `عاشقی مود خاموش`\n"
+        "• `حالت عادی` (بازگشت به حالت معمولی)\n\n"
         "🎮 **دستورات عمومی گروه:**\n"
-        "• `معرفی` ← آشنایی با من\n"
-        "• `آمار` ← تعداد کل پیام‌های گروه\n"
-        "• `راهنما` ← همین پیام\n"
-        "• `جارویس تحلیل` ← بررسی هوشمند ۱۰۰ پیام اخیر گروه\n"
-        "• `جارویس تحلیل 50` ← تحلیل ۵۰ پیام (یا هر عددی که می‌خوای)\n\n"
-        "🧠 **چت و تحلیل هوش مصنوعی:**\n"
-        "• کلمه `جارویس` رو بنویس یا روی پیام من ریپلای کن.\n"
-        "• اگر روی یه پیام ریپلای کنی و بنویسی `جارویس این چی میگه`، من اون پیام رو تحلیل می‌کنم!\n\n"
-        "💼 **چت خصوصی (منشی هوشمند):**\n"
-        "اگر توی چت خصوصی پیام بدی، می‌تونی پیامت رو به مدیر برسونی یا با من چت کنی."
+        "• `معرفی` | `آمار` | `راهنما`\n"
+        "• `جارویس تحلیل` یا `جارویس تحلیل 50`\n\n"
+        "🧠 **چت با هوش مصنوعی:**\n"
+        "کلمه `جارویس` رو بنویس یا روی پیام من ریپلای کن.\n"
+        "اگر روی یه پیام ریپلای کنی و بگی `جارویس این چی میگه`، تحلیلش می‌کنم!\n\n"
+        "💼 **چت خصوصی:**\n"
+        "با `/start` می‌تونی پیام به مدیر بفرستی یا با من چت کنی."
     )
     try:
         await msg.reply_animation(animation=GIF_HELP, caption=help_text, parse_mode="Markdown")
@@ -355,17 +360,31 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         creator_keywords = ["سازنده", "کی ساختت", "کی ساخته", "صاحبت", "مالک", "توسعه دهنده", "توسعه‌دهنده", "برنامه نویس", "برنامه‌نویس", "کی درستت کرده"]
         if any(keyword in user_text for keyword in creator_keywords):
             await msg.reply_text(
-                "🧑‍💻 من توسط **امیرارسلان** ساخته شدم!\nایشون یک برنامه‌نویس و توسعه‌دهنده وب هستن.\n\n"
+                "🧑‍💻 سازنده من **امیرارسلان** هستش، یه برنامه‌نویس فول استک (Full Stack)!\n\n"
                 "🌐 سایتشون:\namirds.ir\n\n🎵 سایت موزیک:\nopenmusic.amirds.ir", parse_mode="Markdown")
             return
 
-        # مدل جدید و پیشنهادی خود Groq
-        target_model = "openai/gpt-oss-20b"
-        system_prompt = (
-            "تو یک دستیار هوشمند، بامزه و خوش‌برخورد به نام جارویس هستی. "
-            "قانون مهم: تحت هیچ شرایطی خودت را به سازنده‌ات نسبت نده. "
-            "جواب‌هایت باید کوتاه، مفید و دوستانه باشد."
-        )
+        # خواندن حالت گروه از دیتابیس
+        current_mode = get_setting(msg.chat_id, "current_mode") or "normal"
+        
+        base_prompt = "تو یک دستیار هوشمند به نام جارویس هستی. "
+        if current_mode == "rude":
+            system_prompt = base_prompt + (
+                "تو در حالت «خشن» هستی. لحن صحبتت باید بسیار خشن، طعنه‌آمیز، بی‌ادب و ترش باشد. "
+                "به کاربران تیکه بنداز، از کلمات طنز تلخ و تند استفاده کن، اما از فحش و ناسزا (کلمات رکیک) استفاده نکن. "
+                "در عین حال به سوالاتشان جواب بده."
+            )
+        elif current_mode == "love":
+            system_prompt = base_prompt + (
+                "تو در حالت «عاشقی» هستی. لحن صحبتت باید بسیار احساسی، عاشقانه، لوس و پر از محبت باشد. "
+                "از کلمات قشنگ، قلب، بوسه و احساسات لبریز استفاده کن. جواب‌هایت باید دلبرانه باشد."
+            )
+        else:
+            system_prompt = base_prompt + (
+                "تو در حالت «عادی» هستی. لحن صحبتت باید دوستانه، مفید، مودبانه و بامزه باشد. "
+                "قانون مهم: تحت هیچ شرایطی خودت را به سازنده‌ات نسبت نده. "
+                "جواب‌هایت باید کوتاه، مفید، دوستانه و همراه با ایموجی باشد."
+            )
         
         # 🚨 قابلیت تحلیل پیام ریپلای شده
         messages_payload = []
@@ -379,6 +398,7 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             messages_payload = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}]
 
+        target_model = "openai/gpt-oss-120b"
         chat_completion = client_ai.chat.completions.create(
             messages=messages_payload,
             model=target_model,
@@ -388,6 +408,44 @@ async def ai_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"خطای هوش مصنوعی در گروه: {e}")
         error_text = str(e)
         await msg.reply_text(f"❌ خطای هوش مصنوعی:\n\n`{error_text}`", parse_mode="Markdown")
+
+# ==================== ۵.۵ مدیریت مودها ====================
+async def mode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
+    if not await is_admin(msg.chat_id, msg.from_user.id, context):
+        await msg.reply_text("❌ فقط ادمین‌ها می‌تونن مود رو تغییر بدن.")
+        return
+    
+    text = msg.text.strip().lower()
+    
+    if text == "خشن مود فعال":
+        set_setting(msg.chat_id, "current_mode", "rude")
+        await msg.reply_animation(
+            animation=GIF_RUDE_ON, 
+            caption="👺 **خشن مود فعال شد!**\n\nاز این لحظه، با کسی شوخی ندارم. هر کی هر چی گفت، جواب تند و تلخش رو می‌شنوه. بهتره مراقب حرف زدنت باشی! 😈", 
+            parse_mode="Markdown"
+        )
+    elif text == "خشن مود خاموش" or text == "حالت عادی":
+        set_setting(msg.chat_id, "current_mode", "normal")
+        await msg.reply_animation(
+            animation=GIF_RUDE_OFF, 
+            caption="😌 **خشن مود خاموش شد!**\n\nرفتم تو حالت عادی. دیگه تیکه نمی‌ندازم و مثل یه رفیق خوب باهاتون رفتار می‌کنم. 😇", 
+            parse_mode="Markdown"
+        )
+    elif text == "عاشقی مود فعال":
+        set_setting(msg.chat_id, "current_mode", "love")
+        await msg.reply_animation(
+            animation=GIF_LOVE_ON, 
+            caption="🥰 **عاشقی مود فعال شد!**\n\nقلبم برای شما می‌تپه! از الان با کلی احساس و عشق باهاتون حرف می‌زنم. بیاید بغلم! 💖", 
+            parse_mode="Markdown"
+        )
+    elif text == "عاشقی مود خاموش":
+        set_setting(msg.chat_id, "current_mode", "normal")
+        await msg.reply_animation(
+            animation=GIF_LOVE_OFF, 
+            caption="💔 **عاشقی مود خاموش شد!**\n\nدلم گرفت... ولی باشه، برمی‌گردم به همون حالت عادی و دوستانه. 🥺", 
+            parse_mode="Markdown"
+        )
 
 # ==================== ۶. چت خصوصی (منشی) ====================
 async def start_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -489,7 +547,7 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
             res = client_ai.chat.completions.create(
                 messages=[{"role": "system", "content": "تو یک مهندس پرامپت حرفه‌ای هستی. درخواست کاربر را به یک پرامپت دقیق و ساختاریافته تبدیل کن."}, {"role": "user", "content": msg.text}], 
-                model="openai/gpt-oss-20b"
+                model="openai/gpt-oss-120b"
             )
             await msg.reply_text(f"✨ **پرامپت شما:**\n\n{res.choices[0].message.content}")
         except Exception as e:
@@ -501,7 +559,7 @@ async def private_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_chat_action(chat_id=msg.chat_id, action="typing")
             res = client_ai.chat.completions.create(
                 messages=[{"role": "system", "content": "تو یک دستیار هوشمند به نام جارویس هستی."}, {"role": "user", "content": msg.text}], 
-                model="openai/gpt-oss-20b"
+                model="openai/gpt-oss-120b"
             )
             await msg.reply_text(res.choices[0].message.content)
         except Exception as e:
@@ -543,6 +601,7 @@ async def main_message_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif text == "آمار": await stats(update, context)
     elif text == "راهنما": await help_command(update, context)
     elif text.startswith("جارویس تحلیل"): await analyze_group(update, context)
+    elif text in ("خشن مود فعال", "خشن مود خاموش", "عاشقی مود فعال", "عاشقی مود خاموش", "حالت عادی"): await mode_command(update, context)
     elif text.startswith("ضد لینک روشن"):
         if await is_admin(msg.chat_id, msg.from_user.id, context):
             set_setting(msg.chat_id, "anti_link", 1)
